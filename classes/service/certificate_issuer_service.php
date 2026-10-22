@@ -255,7 +255,10 @@ final class certificate_issuer_service {
             return true;
         }
 
-        return !empty($customcert->emailstudents) && $issue->studentemailed === 0;
+        // A failed student email is retried with backoff, not on every run (see email_retry_backoff).
+        return !empty($customcert->emailstudents)
+            && $issue->studentemailed === 0
+            && email_retry_backoff::is_due((int)$issue->id);
     }
 
     /**

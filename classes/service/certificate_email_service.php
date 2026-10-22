@@ -182,63 +182,16 @@ final class certificate_email_service {
         $tempfile = $tempdir . '/' . md5(microtime() . $user->id) . '.pdf';
         file_put_contents($tempfile, $filecontents);
 
-        $senttostudent = false;
-        $attemptedstudentsend = false;
+        try {
+            $senttostudent = false;
+            $attemptedstudentsend = false;
 
-        // Retry a processed issue only when studentemailed is explicitly 0.
-        $studentemailed = $user->studentemailed === null ? null : (int)$user->studentemailed;
-        $needsstudentemail = $studentemailed !== 1 && (!$alreadyprocessed || $studentemailed === 0);
-        if ($customcert->emailstudents && $needsstudentemail) {
-            $attemptedstudentsend = true;
-            $recipientlang = mod_customcert_get_language_to_use($customcert, $user, $customcert->courselang ?? null);
-            $switched = mod_customcert_apply_runtime_language($recipientlang);
-            if ($switched) {
-                // This is a failsafe -- if an exception triggers during the template rendering, this should still execute.
-                // Preventing a user from getting trapped with the wrong language.
-                core_shutdown_manager::register_function('force_current_language', [$originallang]);
-            }
-
-            $renderable = new email_certificate(
-                true,
-                $userfullname,
-                $courseshortname,
-                $coursefullname,
-                $certificatename,
-                $context->instanceid
-            );
-
-            $subject = get_string('emailstudentsubject', 'customcert', $info);
-            $message = $textrenderer->render($renderable);
-            $messagehtml = $htmlrenderer->render($renderable);
-            $senttostudent = email_to_user(
-                $user,
-                $userfrom,
-                html_entity_decode($subject, ENT_COMPAT),
-                $message,
-                $messagehtml,
-                $tempfile,
-                $filename
-            );
-
-            if ($recipientlang !== $originallang) {
-                mod_customcert_apply_runtime_language($originallang);
-            }
-        }
-
-        if ($customcert->emailteachers && !$alreadyprocessed) {
-            $teachers = get_enrolled_users($context, 'moodle/course:update');
-
-            $renderable = new email_certificate(
-                false,
-                $userfullname,
-                $courseshortname,
-                $coursefullname,
-                $certificatename,
-                $context->instanceid
-            );
-
-            foreach ($teachers as $teacher) {
-                $recipientlang = mod_customcert_get_language_to_use($customcert, $teacher, $customcert->courselang ?? null);
+            // Retry a processed issue only when studentemailed is explicitly 0.
+            $studentemailed = $user->studentemailed === null ? null : (int)$user->studentemailed;
+            $needsstudentemail = $studentemailed !== 1 && (!$alreadyprocessed || $studentemailed === 0);
+            if ($customcert->emailstudents && $needsstudentemail) {
+                $attemptedstudentsend = true;
+                $recipientlang = mod_customcert_get_language_to_use($customcert, $user, $customcert->courselang ?? null);
                 $switched = mod_customcert_apply_runtime_language($recipientlang);
                 if ($switched) {
                     // This is a failsafe -- if an exception triggers during the template rendering, this should still execute.
@@ -246,11 +199,20 @@ final class certificate_email_service {
                     core_shutdown_manager::register_function('force_current_language', [$originallang]);
                 }
 
-                $subject = get_string('emailnonstudentsubject', 'customcert', $info);
+                $renderable = new email_certificate(
+                    true,
+                    $userfullname,
+                    $courseshortname,
+                    $coursefullname,
+                    $certificatename,
+                    $context->instanceid
+                );
+
+                $subject = get_string('emailstudentsubject', 'customcert', $info);
                 $message = $textrenderer->render($renderable);
                 $messagehtml = $htmlrenderer->render($renderable);
-                email_to_user(
-                    $teacher,
+                $senttostudent = email_to_user(
+                    $user,
                     $userfrom,
                     html_entity_decode($subject, ENT_COMPAT),
                     $message,
@@ -263,31 +225,33 @@ final class certificate_email_service {
                     mod_customcert_apply_runtime_language($originallang);
                 }
             }
-        }
 
-        if (!empty($customcert->emailothers) && !$alreadyprocessed) {
-            $others = explode(',', $customcert->emailothers);
-            foreach ($others as $email) {
-                $email = trim($email);
-                if (validate_email($email)) {
-                    $renderable = new email_certificate(
-                        false,
-                        $userfullname,
-                        $courseshortname,
-                        $coursefullname,
-                        $certificatename,
-                        $context->instanceid
-                    );
+            if ($customcert->emailteachers && !$alreadyprocessed) {
+                $teachers = get_enrolled_users($context, 'moodle/course:update');
+
+                $renderable = new email_certificate(
+                    false,
+                    $userfullname,
+                    $courseshortname,
+                    $coursefullname,
+                    $certificatename,
+                    $context->instanceid
+                );
+
+                foreach ($teachers as $teacher) {
+                    $recipientlang = mod_customcert_get_language_to_use($customcert, $teacher, $customcert->courselang ?? null);
+                    $switched = mod_customcert_apply_runtime_language($recipientlang);
+                    if ($switched) {
+                        // This is a failsafe -- if an exception triggers during the template rendering, this should still execute.
+                        // Preventing a user from getting trapped with the wrong language.
+                        core_shutdown_manager::register_function('force_current_language', [$originallang]);
+                    }
 
                     $subject = get_string('emailnonstudentsubject', 'customcert', $info);
                     $message = $textrenderer->render($renderable);
                     $messagehtml = $htmlrenderer->render($renderable);
-
-                    $emailuser = new stdClass();
-                    $emailuser->id = -1;
-                    $emailuser->email = $email;
                     email_to_user(
-                        $emailuser,
+                        $teacher,
                         $userfrom,
                         html_entity_decode($subject, ENT_COMPAT),
                         $message,
@@ -295,31 +259,76 @@ final class certificate_email_service {
                         $tempfile,
                         $filename
                     );
+
+                    if ($recipientlang !== $originallang) {
+                        mod_customcert_apply_runtime_language($originallang);
+                    }
                 }
             }
-        }
 
-        // Field 'emailed' just means "processed"; only needs setting once.
-        if (!$alreadyprocessed) {
-            $this->issues->mark_emailed($issueid);
-        }
+            if (!empty($customcert->emailothers) && !$alreadyprocessed) {
+                $others = explode(',', $customcert->emailothers);
+                foreach ($others as $email) {
+                    $email = trim($email);
+                    if (validate_email($email)) {
+                        $renderable = new email_certificate(
+                            false,
+                            $userfullname,
+                            $courseshortname,
+                            $coursefullname,
+                            $certificatename,
+                            $context->instanceid
+                        );
 
-        // Only record success when actually confirmed; a failed attempt moves studentemailed to
-        // the explicit, retryable 0 state rather than being left NULL or unset.
-        if ($senttostudent) {
-            $this->issues->mark_student_emailed($issueid);
-        } else if ($attemptedstudentsend) {
-            $this->issues->mark_student_email_failed($issueid);
-        }
+                        $subject = get_string('emailnonstudentsubject', 'customcert', $info);
+                        $message = $textrenderer->render($renderable);
+                        $messagehtml = $htmlrenderer->render($renderable);
 
-        // Trigger completion reevaluation if the completionemailed rule is enabled for this instance.
-        // This covers both the synchronous and adhoc email dispatch paths.
-        if (!empty($customcert->completionemailed)) {
-            $cm = get_coursemodule_from_instance('customcert', $customcertid, 0, false, MUST_EXIST);
-            $course = get_course($cm->course);
-            $completioninfo = new \completion_info($course);
-            if ($completioninfo->is_enabled($cm)) {
-                $completioninfo->update_state($cm, COMPLETION_UNKNOWN, (int)$user->id);
+                        $emailuser = new stdClass();
+                        $emailuser->id = -1;
+                        $emailuser->email = $email;
+                        email_to_user(
+                            $emailuser,
+                            $userfrom,
+                            html_entity_decode($subject, ENT_COMPAT),
+                            $message,
+                            $messagehtml,
+                            $tempfile,
+                            $filename
+                        );
+                    }
+                }
+            }
+
+            // Field 'emailed' just means "processed"; only needs setting once.
+            if (!$alreadyprocessed) {
+                $this->issues->mark_emailed($issueid);
+            }
+
+            // Only record success when actually confirmed; a failed attempt moves studentemailed to
+            // the explicit, retryable 0 state rather than being left NULL or unset.
+            if ($senttostudent) {
+                $this->issues->mark_student_emailed($issueid);
+                email_retry_backoff::clear($issueid);
+            } else if ($attemptedstudentsend) {
+                $this->issues->mark_student_email_failed($issueid);
+                email_retry_backoff::record_failure($issueid);
+            }
+
+            // Trigger completion reevaluation if the completionemailed rule is enabled for this instance.
+            // This covers both the synchronous and adhoc email dispatch paths.
+            if (!empty($customcert->completionemailed)) {
+                $cm = get_coursemodule_from_instance('customcert', $customcertid, 0, false, MUST_EXIST);
+                $course = get_course($cm->course);
+                $completioninfo = new \completion_info($course);
+                if ($completioninfo->is_enabled($cm)) {
+                    $completioninfo->update_state($cm, COMPLETION_UNKNOWN, (int)$user->id);
+                }
+            }
+        } finally {
+            // The attachment is only needed while sending. Leaving it behind filled disks when sending failed.
+            if (is_file($tempfile)) {
+                @unlink($tempfile);
             }
         }
     }
